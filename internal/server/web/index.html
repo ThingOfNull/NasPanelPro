@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NasPanel Pro — 布局编辑器</title>
+  <style>
+    :root { --bg:#0d1117; --panel:#161b22; --accent:#3fb950; --text:#e6edf3; --muted:#8b949e; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui,sans-serif; background:var(--bg); color:var(--text); display:flex; flex-direction:column; height:100vh; }
+    header { padding:10px 16px; background:var(--panel); border-bottom:1px solid #30363d; display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+    header button { background:#238636; color:#fff; border:none; padding:8px 14px; border-radius:6px; cursor:pointer; }
+    header button.secondary { background:#21262d; }
+    main { flex:1; display:flex; min-height:0; }
+    #palette { width:200px; background:var(--panel); border-right:1px solid #30363d; padding:12px; overflow:auto; }
+    #palette h3 { margin:0 0 8px; font-size:13px; color:var(--muted); }
+    .ptype { padding:8px; margin-bottom:6px; background:#21262d; border-radius:6px; cursor:grab; font-size:13px; }
+    #stage-wrap { flex:1; padding:16px; overflow:auto; display:flex; align-items:flex-start; justify-content:center; }
+    #stage { position:relative; width:1280px; height:480px; background:#010409; border:2px solid #30363d; transform-origin: top left; }
+    #props { width:280px; background:var(--panel); border-left:1px solid #30363d; padding:12px; overflow:auto; font-size:13px; }
+    #props label { display:block; margin-top:8px; color:var(--muted); }
+    #props input, #props select { width:100%; margin-top:4px; padding:6px; background:#0d1117; border:1px solid #30363d; color:var(--text); border-radius:4px; }
+    .widget { position:absolute; border:2px dashed var(--accent); background:rgba(63,185,80,0.12); cursor:move; min-width:40px; min-height:24px; }
+    .widget.selected { border-color:#58a6ff; box-shadow:0 0 0 2px rgba(88,166,255,0.3); }
+    .widget .cap { pointer-events:none; font-size:11px; padding:2px 4px; color:var(--muted); }
+    #chart-search { margin-top:8px; }
+    #chart-results { max-height:120px; overflow:auto; font-size:11px; margin-top:4px; }
+    #chart-results div { padding:4px; cursor:pointer; border-radius:4px; }
+    #chart-results div:hover { background:#21262d; }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>NasPanel Pro 2.0</strong>
+    <span id="status" style="color:var(--muted);font-size:13px;"></span>
+    <button type="button" id="btn-load">从服务器加载</button>
+    <button type="button" id="btn-save">保存到服务器</button>
+    <button type="button" class="secondary" id="btn-scale">缩放适配窗口</button>
+  </header>
+  <main>
+    <aside id="palette">
+      <h3>组件</h3>
+      <div class="ptype" draggable="true" data-type="text">Text</div>
+      <div class="ptype" draggable="true" data-type="gauge">Gauge</div>
+      <div class="ptype" draggable="true" data-type="line">LineChart</div>
+      <div class="ptype" draggable="true" data-type="progress">ProgressBar</div>
+      <div class="ptype" draggable="true" data-type="histogram">Histogram</div>
+    </aside>
+    <div id="stage-wrap">
+      <div id="stage"></div>
+    </div>
+    <aside id="props">
+      <h3 style="margin-top:0;">属性</h3>
+      <p id="no-sel" style="color:var(--muted);">点击画布上的组件</p>
+      <div id="prop-form" style="display:none;">
+        <label>类型</label><input id="f-type" readonly />
+        <label>X</label><input id="f-x" type="number" />
+        <label>Y</label><input id="f-y" type="number" />
+        <label>W</label><input id="f-w" type="number" />
+        <label>H</label><input id="f-h" type="number" />
+        <label>Chart ID</label><input id="f-chart" placeholder="system.cpu" />
+        <label>Dimensions（逗号分隔）</label><input id="f-dims" placeholder="user,system" />
+        <label>Label</label><input id="f-label" />
+        <label>Unit</label>
+        <select id="f-unit">
+          <option value="">auto</option>
+          <option value="percent">percent</option>
+          <option value="bytes">bytes</option>
+          <option value="none">none</option>
+        </select>
+        <div id="chart-search">
+          <label>搜索 Chart</label>
+          <input id="f-q" placeholder="cpu, ram..." />
+          <div id="chart-results"></div>
+        </div>
+        <label>维度（勾选，需先选 chart）</label>
+        <div id="dim-checks"></div>
+      </div>
+    </aside>
+  </main>
+  <script>
+(function(){
+  const stage = document.getElementById('stage');
+  const status = document.getElementById('status');
+  let layout = {
+    version: 1,
+    screen_width: 1280,
+    screen_height: 480,
+    switch_interval_secs: 15,
+    scenes: [{ id: 's1', name: 'Scene 1', widgets: [] }]
+  };
+  let selected = null;
+  let drag = null;
+  let scale = 0.55;
+
+  function setStatus(t) { status.textContent = t; }
+
+  function syncLayoutFromDOM() {
+    const scene = layout.scenes[0];
+    scene.widgets = [];
+    stage.querySelectorAll('.widget').forEach(el => {
+      scene.widgets.push(JSON.parse(el.dataset.wjson));
+    });
+  }
+
+  function renderWidgets() {
+    stage.innerHTML = '';
+    const scene = layout.scenes[0];
+    (scene.widgets || []).forEach((w, i) => addWidgetEl(w, i));
+  }
+
+  function addWidgetEl(w, idx) {
+    const el = document.createElement('div');
+    el.className = 'widget';
+    el.style.left = w.x + 'px';
+    el.style.top = w.y + 'px';
+    el.style.width = w.w + 'px';
+    el.style.height = w.h + 'px';
+    el.dataset.wjson = JSON.stringify(w);
+    el.innerHTML = '<div class="cap">' + (w.type || '') + (w.chart_id ? ' · ' + w.chart_id : '') + '</div>';
+    el.addEventListener('mousedown', ev => {
+      if (ev.target.closest('.widget') !== el) return;
+      selectWidget(el);
+      drag = { el, sx: ev.clientX, sy: ev.clientY, ox: w.x, oy: w.y };
+      ev.preventDefault();
+    });
+    stage.appendChild(el);
+    return el;
+  }
+
+  function selectWidget(el) {
+    stage.querySelectorAll('.widget').forEach(e => e.classList.remove('selected'));
+    if (el) el.classList.add('selected');
+    selected = el;
+    document.getElementById('no-sel').style.display = el ? 'none' : 'block';
+    document.getElementById('prop-form').style.display = el ? 'block' : 'none';
+    if (!el) return;
+    const w = JSON.parse(el.dataset.wjson);
+    document.getElementById('f-type').value = w.type || '';
+    document.getElementById('f-x').value = w.x;
+    document.getElementById('f-y').value = w.y;
+    document.getElementById('f-w').value = w.w;
+    document.getElementById('f-h').value = w.h;
+    document.getElementById('f-chart').value = w.chart_id || '';
+    document.getElementById('f-dims').value = (w.dimensions || []).join(',');
+    document.getElementById('f-label').value = w.label || '';
+    document.getElementById('f-unit').value = w.unit || '';
+    loadDimsForChart(w.chart_id, w.dimensions || []);
+  }
+
+  function readWidgetFromForm() {
+    if (!selected) return;
+    const w = JSON.parse(selected.dataset.wjson);
+    w.type = document.getElementById('f-type').value;
+    w.x = parseFloat(document.getElementById('f-x').value) || 0;
+    w.y = parseFloat(document.getElementById('f-y').value) || 0;
+    w.w = parseFloat(document.getElementById('f-w').value) || 100;
+    w.h = parseFloat(document.getElementById('f-h').value) || 40;
+    w.chart_id = document.getElementById('f-chart').value.trim();
+    w.dimensions = document.getElementById('f-dims').value.split(',').map(s => s.trim()).filter(Boolean);
+    w.label = document.getElementById('f-label').value;
+    w.unit = document.getElementById('f-unit').value;
+    selected.dataset.wjson = JSON.stringify(w);
+    selected.style.left = w.x + 'px';
+    selected.style.top = w.y + 'px';
+    selected.style.width = w.w + 'px';
+    selected.style.height = w.h + 'px';
+    selected.querySelector('.cap').textContent = (w.type || '') + (w.chart_id ? ' · ' + w.chart_id : '');
+  }
+
+  ['f-x','f-y','f-w','f-h','f-chart','f-dims','f-label','f-unit'].forEach(id => {
+    document.getElementById(id).addEventListener('change', readWidgetFromForm);
+    document.getElementById(id).addEventListener('input', readWidgetFromForm);
+  });
+
+  document.addEventListener('mousemove', ev => {
+    if (!drag) return;
+    const dx = (ev.clientX - drag.sx) / scale;
+    const dy = (ev.clientY - drag.sy) / scale;
+    const w = JSON.parse(drag.el.dataset.wjson);
+    w.x = Math.round(drag.ox + dx);
+    w.y = Math.round(drag.oy + dy);
+    drag.el.dataset.wjson = JSON.stringify(w);
+    drag.el.style.left = w.x + 'px';
+    drag.el.style.top = w.y + 'px';
+    if (selected === drag.el) {
+      document.getElementById('f-x').value = w.x;
+      document.getElementById('f-y').value = w.y;
+    }
+  });
+  document.addEventListener('mouseup', () => { drag = null; });
+
+  stage.addEventListener('click', ev => {
+    if (ev.target === stage) { selectWidget(null); }
+  });
+
+  document.querySelectorAll('.ptype').forEach(pt => {
+    pt.addEventListener('dragstart', ev => {
+      ev.dataTransfer.setData('type', pt.dataset.type);
+    });
+  });
+  stage.addEventListener('dragover', ev => { ev.preventDefault(); });
+  stage.addEventListener('drop', ev => {
+    ev.preventDefault();
+    const type = ev.dataTransfer.getData('type');
+    if (!type) return;
+    const r = stage.getBoundingClientRect();
+    const x = Math.round((ev.clientX - r.left) / scale);
+    const y = Math.round((ev.clientY - r.top) / scale);
+    const w = { type, x, y, w: type === 'text' ? 200 : 120, h: type === 'progress' ? 200 : 48, chart_id: '', dimensions: [], label: type === 'text' ? 'Text' : '' };
+    if (type !== 'text') { w.chart_id = 'system.cpu'; w.dimensions = ['user']; }
+    addWidgetEl(w);
+    syncLayoutFromDOM();
+    selectWidget(stage.lastElementChild);
+  });
+
+  async function apiLoad() {
+    const r = await fetch('/api/layout');
+    if (!r.ok) throw new Error(await r.text());
+    layout = await r.json();
+    if (!layout.scenes || !layout.scenes.length) layout.scenes = [{ id: 's1', name: 'S1', widgets: [] }];
+    renderWidgets();
+    selectWidget(null);
+    setStatus('已加载');
+  }
+  async function apiSave() {
+    syncLayoutFromDOM();
+    const r = await fetch('/api/layout', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(layout) });
+    if (!r.ok) throw new Error(await r.text());
+    setStatus('已保存');
+  }
+
+  document.getElementById('btn-load').onclick = () => apiLoad().catch(e => setStatus('错误: ' + e));
+  document.getElementById('btn-save').onclick = () => apiSave().catch(e => setStatus('错误: ' + e));
+  document.getElementById('btn-scale').onclick = () => {
+    const wrap = document.getElementById('stage-wrap');
+    const sw = (wrap.clientWidth - 32) / 1280;
+    const sh = (wrap.clientHeight - 32) / 480;
+    scale = Math.min(sw, sh, 1);
+    stage.style.transform = 'scale(' + scale + ')';
+    setStatus('缩放 ' + (scale*100).toFixed(0) + '%');
+  };
+
+  let searchT;
+  document.getElementById('f-q').addEventListener('input', () => {
+    clearTimeout(searchT);
+    searchT = setTimeout(searchCharts, 300);
+  });
+
+  async function searchCharts() {
+    const q = document.getElementById('f-q').value;
+    const box = document.getElementById('chart-results');
+    box.innerHTML = '';
+    const r = await fetch('/api/netdata/charts?q=' + encodeURIComponent(q));
+    if (!r.ok) { box.textContent = '搜索失败'; return; }
+    const j = await r.json();
+    (j.charts || []).forEach(c => {
+      const d = document.createElement('div');
+      d.textContent = c.id + ' — ' + (c.title || '');
+      d.onclick = () => {
+        document.getElementById('f-chart').value = c.id;
+        readWidgetFromForm();
+        loadDimsForChart(c.id, []);
+      };
+      box.appendChild(d);
+    });
+  }
+
+  async function loadDimsForChart(chartId, selectedDims) {
+    const box = document.getElementById('dim-checks');
+    box.innerHTML = '';
+    if (!chartId) return;
+    const r = await fetch('/api/netdata/chart/' + encodeURIComponent(chartId));
+    if (!r.ok) return;
+    const j = await r.json();
+    (j.dimensions || []).forEach(dim => {
+      const lab = document.createElement('label');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = dim;
+      cb.checked = selectedDims.includes(dim);
+      cb.onchange = () => {
+        const set = new Set((document.getElementById('f-dims').value.split(',').map(s => s.trim()).filter(Boolean)));
+        if (cb.checked) set.add(dim); else set.delete(dim);
+        document.getElementById('f-dims').value = [...set].join(',');
+        readWidgetFromForm();
+      };
+      lab.appendChild(cb);
+      lab.appendChild(document.createTextNode(' ' + dim));
+      box.appendChild(lab);
+    });
+  }
+
+  document.getElementById('f-chart').addEventListener('change', () => {
+    const w = selected ? JSON.parse(selected.dataset.wjson) : {};
+    loadDimsForChart(document.getElementById('f-chart').value.trim(), w.dimensions || []);
+  });
+
+  document.getElementById('btn-scale').click();
+  apiLoad().catch(() => { setStatus('使用本地默认（服务器未就绪）'); renderWidgets(); });
+})();
+  </script>
+</body>
+</html>

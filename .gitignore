@@ -1,0 +1,5 @@
+.cursor
+/configs/layout.json
+/configs/nodes.json
+/naspanel
+/cmd/netdata-probe
