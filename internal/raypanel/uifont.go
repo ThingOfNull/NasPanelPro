@@ -1,6 +1,7 @@
 package raypanel
 
 import (
+	"image/color"
 	"log"
 	"os"
 	"strconv"
@@ -9,7 +10,6 @@ import (
 	"naspanel/internal/layout"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
-	"image/color"
 )
 
 var (

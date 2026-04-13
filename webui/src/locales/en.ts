@@ -75,6 +75,10 @@ const en = {
     showYAxis: 'Line Y-axis',
     hideLabelBanner: 'Hide title bar',
     linePoints: 'Line sample points',
+    addScene: 'New scene',
+    groupDataBinding: 'Data Binding',
+    groupLayout: 'Layout',
+    groupAppearance: 'Appearance',
   },
   chartPreview: {
     textDefault: 'Text',

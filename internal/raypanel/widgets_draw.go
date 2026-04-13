@@ -122,14 +122,14 @@ func drawWidgetTitleBar(w *layout.Widget, x, y, fw, th float32) {
 	if lbl == "" {
 		return
 	}
-	sz := float32(15)
+	sz := float32(13)
 	if th < 20 {
-		sz = 12
+		sz = 11
 	}
-	drawUIText(panelUIFont, panelUIFontOk, lbl, x+6, y+3, sz, colText)
+	drawUIText(panelUIFont, panelUIFontOk, lbl, x+6, y+4, sz, colText)
 }
 
-func drawScene(lc *layout.LayoutConfig, sceneIndex int, snap netdata.DataSnapshot, rings *LineRings, lw, lh int32) {
+func drawScene(lc *layout.LayoutConfig, sceneIndex int, snap netdata.DataSnapshot, rings *LineRings, texCache *ChartTexCache, lw, lh int32) {
 	if lc == nil || sceneIndex < 0 || sceneIndex >= len(lc.Scenes) {
 		return
 	}
@@ -138,7 +138,7 @@ func drawScene(lc *layout.LayoutConfig, sceneIndex int, snap netdata.DataSnapsho
 	for wi := range sc.Widgets {
 		w := &sc.Widgets[wi]
 		key := ringKey(sceneIndex, wi, w)
-		drawWidget(w, snap, rings, key, lw, lh)
+		drawWidget(w, snap, rings, texCache, key, lw, lh)
 	}
 }
 
@@ -149,7 +149,7 @@ func ringKey(sceneIndex, widgetIndex int, w *layout.Widget) string {
 	return fmt.Sprintf("%d:%d", sceneIndex, widgetIndex)
 }
 
-func drawWidget(w *layout.Widget, snap netdata.DataSnapshot, rings *LineRings, ringKey string, lw, lh int32) {
+func drawWidget(w *layout.Widget, snap netdata.DataSnapshot, rings *LineRings, texCache *ChartTexCache, ringKey string, lw, lh int32) {
 	x, y := float32(w.X), float32(w.Y)
 	fw, fh := float32(w.W), float32(w.H)
 	th := widgetTitleHeight(w)
@@ -167,11 +167,11 @@ func drawWidget(w *layout.Widget, snap netdata.DataSnapshot, rings *LineRings, r
 	case layout.WidgetGauge:
 		drawWidgetGauge(w, snap, ix, iy, iw, ih)
 	case layout.WidgetLine:
-		drawWidgetLine(w, rings, ringKey, ix, iy, iw, ih)
+		drawWidgetLine(w, rings, texCache, ringKey, ix, iy, iw, ih)
 	case layout.WidgetProgress:
 		drawWidgetProgress(w, snap, ix, iy, iw, ih)
 	case layout.WidgetHistogram:
-		drawWidgetHistogram(w, snap, ix, iy, iw, ih)
+		drawWidgetHistogram(w, snap, rings, texCache, ringKey, ix, iy, iw, ih)
 	}
 
 	if w.ShowBorder {
@@ -207,6 +207,17 @@ func drawWidgetText(w *layout.Widget, snap netdata.DataSnapshot, x, y, fw, fh fl
 	drawUIMultiline(panelUIFont, panelUIFontOk, msg, x+4, y+4, float32(sz), colText)
 }
 
+// gaugeArcAngles 根据 gauge_arc_degrees 返回 (spanStart, spanEnd)。
+// 180°: 从正左（180°）到正右（360°），即下半弧。
+// 270°: 从左下（135°）到右下（405°），即 3/4 圆弧。
+func gaugeArcAngles(arcDeg int) (start, end float32) {
+	if arcDeg == 270 {
+		return 135, 405
+	}
+	// 默认 180°
+	return 180, 360
+}
+
 func drawWidgetGauge(w *layout.Widget, snap netdata.DataSnapshot, x, y, fw, fh float32) {
 	v, ok := widgetPrimaryValue(snap, w)
 	if !ok {
@@ -215,8 +226,6 @@ func drawWidgetGauge(w *layout.Widget, snap netdata.DataSnapshot, x, y, fw, fh f
 	if strings.EqualFold(w.Unit, "percent") {
 		// 已是 0-100，直接使用
 	} else {
-		// unit 为空或非 percent：值 > 1 视为 0-100 量纲，除以 100 得比例后再乘回；
-		// 值本身已在 0-1 范围内（如归一化比例）则直接乘 100。
 		v = math.Abs(v)
 		if v > 1 {
 			v = v / 100.0
@@ -226,13 +235,32 @@ func drawWidgetGauge(w *layout.Widget, snap netdata.DataSnapshot, x, y, fw, fh f
 		}
 		v *= 100
 	}
+
+	arcDeg := w.GaugeArcDegrees
+	if arcDeg != 270 {
+		arcDeg = 180
+	}
+	spanStart, spanEnd := gaugeArcAngles(arcDeg)
+
 	cx := x + fw/2
-	cy := y + fh*0.55
+	// 270° 时圆心居中；180° 时圆心偏下
+	var cy float32
+	if arcDeg == 270 {
+		cy = y + fh/2
+	} else {
+		cy = y + fh*0.60
+	}
 	r := float32(math.Min(float64(fw), float64(fh))) * 0.38
-	inner := r * 0.65
-	spanStart := float32(180)
-	spanEnd := float32(360)
-	rl.DrawRingLines(rl.NewVector2(cx, cy), inner, r, spanStart, spanEnd, 32, colBarTrack)
+	if arcDeg == 270 {
+		r = float32(math.Min(float64(fw), float64(fh))) * 0.42
+	}
+	inner := r * 0.68
+	thick := r - inner
+
+	// 轨道弧
+	rl.DrawRingLines(rl.NewVector2(cx, cy), inner, r, spanStart, spanEnd, 48, colBarTrack)
+
+	// 填充弧
 	p := float32(math.Max(0, math.Min(100, float64(v)))) / 100
 	end := spanStart + (spanEnd-spanStart)*p
 	col := colAccent
@@ -242,35 +270,95 @@ func drawWidgetGauge(w *layout.Widget, snap netdata.DataSnapshot, x, y, fw, fh f
 		col = rl.NewColor(210, 153, 34, 255)
 	}
 	if p > 0.001 {
-		rl.DrawRing(rl.NewVector2(cx, cy), inner, r, spanStart, end, 32, col)
+		rl.DrawRing(rl.NewVector2(cx, cy), inner, r, spanStart, end, 48, col)
 	}
-	drawUIText(panelUIFont, panelUIFontOk, fmt.Sprintf("%.0f%%", v), cx-r, cy, 18, colMuted)
+
+	// 端点圆形装饰（起点始终显示，终点仅有值时显示）
+	startRadRL := float64(spanStart) * math.Pi / 180
+	tipR := thick * 0.5
+	epx := cx + (inner+thick/2)*float32(math.Cos(startRadRL))
+	epy := cy + (inner+thick/2)*float32(math.Sin(startRadRL))
+	rl.DrawCircle(int32(epx), int32(epy), tipR, colBarTrack)
+	if p > 0.001 {
+		endRadRL := float64(end) * math.Pi / 180
+		epx2 := cx + (inner+thick/2)*float32(math.Cos(endRadRL))
+		epy2 := cy + (inner+thick/2)*float32(math.Sin(endRadRL))
+		rl.DrawCircle(int32(epx2), int32(epy2), tipR, col)
+	}
+
+	// 中心值文字（背景圆角矩形 + 白色数字）
+	valStr := fmt.Sprintf("%.0f%%", v)
+	textSz := float32(14)
+	if r > 50 {
+		textSz = 16
+	}
+	// 小背景卡片
+	cardW := float32(52)
+	cardH := float32(22)
+	cardX := cx - cardW/2
+	cardY := cy - cardH/2
+	rl.DrawRectangleRounded(rl.NewRectangle(cardX, cardY, cardW, cardH), 0.4, 8, colPanel)
+	drawUIText(panelUIFont, panelUIFontOk, valStr, cardX+cardW/2-float32(len(valStr))*textSz*0.3, cardY+3, textSz, colText)
 }
 
-func drawWidgetLine(w *layout.Widget, rings *LineRings, key string, x, y, fw, fh float32) {
-	axisW := float32(0)
+func drawWidgetLine(w *layout.Widget, rings *LineRings, texCache *ChartTexCache, key string, x, y, fw, fh float32) {
+	version := rings.Version(key)
+	pts := rings.Get(key)
+
+	if len(pts) < 2 {
+		rl.DrawRectangleLines(int32(x), int32(y), int32(fw), int32(fh), colMuted)
+		drawUIText(panelUIFont, panelUIFontOk, "no data", x+4, y+4, 12, colMuted)
+		return
+	}
+
+	// 构建多维度 map（单维度兼容）
+	dim := ""
+	if len(w.Dimensions) > 0 {
+		dim = w.Dimensions[0]
+	}
+	if dim == "" {
+		dim = "value"
+	}
+	ptsMap := map[string][]float64{dim: pts}
+	dims := []string{dim}
+
+	tex := texCache.UpdateLine(key, ptsMap, dims, int32(fw), int32(fh), version)
+	if tex.ID == 0 {
+		// 回退：简单折线手绘
+		drawSimpleLine(pts, x, y, fw, fh)
+		return
+	}
+
+	src := rl.NewRectangle(0, 0, float32(tex.Width), -float32(tex.Height))
+	dst := rl.NewRectangle(x, y, fw, fh)
+	rl.DrawTexturePro(tex, src, dst, rl.NewVector2(0, 0), 0, tintWhite)
+
+	// Y 轴刻度（叠加在纹理之上）
 	if w.ShowYAxis {
-		axisW = 42
-		if axisW > fw*0.35 {
-			axisW = fw * 0.35
+		var minV, maxV float64 = pts[0], pts[0]
+		for _, p := range pts {
+			if p < minV {
+				minV = p
+			}
+			if p > maxV {
+				maxV = p
+			}
 		}
+		sMax := formatValCompact(maxV, w.Unit)
+		sMid := formatValCompact((minV+maxV)/2, w.Unit)
+		sMin := formatValCompact(minV, w.Unit)
+		drawUIText(panelUIFont, panelUIFontOk, sMax, x+2, y+2, 10, colMuted)
+		drawUIText(panelUIFont, panelUIFontOk, sMid, x+2, y+fh/2-6, 10, colMuted)
+		drawUIText(panelUIFont, panelUIFontOk, sMin, x+2, y+fh-14, 10, colMuted)
 	}
-	px := x + axisW
-	pw := fw - axisW
-	if pw < 8 {
-		pw = 8
-	}
+}
+
+// drawSimpleLine 回退：无纹理时简单手绘折线。
+func drawSimpleLine(pts []float64, x, y, fw, fh float32) {
 	py0 := y + 4
 	ph := fh - 8
 	if ph < 4 {
 		ph = 4
-	}
-
-	pts := rings.Get(key)
-	if len(pts) < 2 {
-		rl.DrawRectangleLines(int32(x), int32(y), int32(fw), int32(fh), colMuted)
-		drawUIText(panelUIFont, panelUIFontOk, "line", x+4, y+4, 14, colMuted)
-		return
 	}
 	minV, maxV := pts[0], pts[0]
 	for _, p := range pts {
@@ -284,7 +372,7 @@ func drawWidgetLine(w *layout.Widget, rings *LineRings, key string, x, y, fw, fh
 	if maxV == minV {
 		maxV = minV + 1
 	}
-	py := func(val float64) int32 {
+	pyFn := func(val float64) int32 {
 		t := (val - minV) / (maxV - minV)
 		return int32(py0 + ph - float32(t)*ph)
 	}
@@ -293,24 +381,9 @@ func drawWidgetLine(w *layout.Widget, rings *LineRings, key string, x, y, fw, fh
 		den = 1
 	}
 	for i := 1; i < len(pts); i++ {
-		x0 := int32(px + float32(i-1)/den*pw)
-		x1 := int32(px + float32(i)/den*pw)
-		rl.DrawLine(x0, py(pts[i-1]), x1, py(pts[i]), colAccent)
-	}
-
-	if w.ShowYAxis && axisW > 4 {
-		sMax := formatValCompact(maxV, w.Unit)
-		sMid := formatValCompact((minV+maxV)/2, w.Unit)
-		sMin := formatValCompact(minV, w.Unit)
-		tx := x + 2
-		drawUIText(panelUIFont, panelUIFontOk, sMax, tx, py0, 11, colMuted)
-		midY := py0 + ph/2 - 6
-		drawUIText(panelUIFont, panelUIFontOk, sMid, tx, midY, 11, colMuted)
-		drawUIText(panelUIFont, panelUIFontOk, sMin, tx, py0+ph-12, 11, colMuted)
-		if axisW > 6 {
-			gx := int32(px - 1)
-			rl.DrawLine(gx, int32(py0), gx, int32(py0+ph), colBarTrack)
-		}
+		x0 := int32(x + float32(i-1)/den*fw)
+		x1 := int32(x + float32(i)/den*fw)
+		rl.DrawLine(x0, pyFn(pts[i-1]), x1, pyFn(pts[i]), colAccent)
 	}
 }
 
@@ -321,13 +394,10 @@ func drawWidgetProgress(w *layout.Widget, snap netdata.DataSnapshot, x, y, fw, f
 	}
 	p := v
 	if strings.EqualFold(w.Unit, "percent") {
-		// 已是 0-100，归一化为比例
 		p = v / 100
 	} else if v > 1 {
-		// 非 percent 且值 > 1：视为 0-100 量纲，同 Gauge 逻辑
 		p = v / 100
 	}
-	// 值在 0-1 范围内时 p 直接使用
 	if p < 0 {
 		p = 0
 	}
@@ -340,43 +410,80 @@ func drawWidgetProgress(w *layout.Widget, snap netdata.DataSnapshot, x, y, fw, f
 	} else if w.WarnThreshold > 0 && v >= w.WarnThreshold {
 		col = rl.NewColor(210, 153, 34, 255)
 	}
-	rl.DrawRectangle(int32(x), int32(y), int32(fw), int32(fh), colBarTrack)
+
+	roundness := float32(0.35)
+	segments := int32(8)
+	trackRect := rl.NewRectangle(x, y, fw, fh)
+	rl.DrawRectangleRounded(trackRect, roundness, segments, colBarTrack)
+
 	if w.Vertical {
 		hfill := float32(p) * fh
-		rl.DrawRectangle(int32(x), int32(y+fh-hfill), int32(fw), int32(hfill), col)
+		if hfill > 1 {
+			fillRect := rl.NewRectangle(x, y+fh-hfill, fw, hfill)
+			rl.DrawRectangleRounded(fillRect, roundness, segments, col)
+		}
 	} else {
 		wfill := float32(p) * fw
-		rl.DrawRectangle(int32(x), int32(y), int32(wfill), int32(fh), col)
+		if wfill > 1 {
+			fillRect := rl.NewRectangle(x, y, wfill, fh)
+			rl.DrawRectangleRounded(fillRect, roundness, segments, col)
+		}
 	}
+
+	// 百分比文字叠加
+	valStr := fmt.Sprintf("%.0f%%", p*100)
+	textSz := float32(fh * 0.55)
+	if textSz < 10 {
+		textSz = 10
+	}
+	if textSz > 18 {
+		textSz = 18
+	}
+	drawUIText(panelUIFont, panelUIFontOk, valStr, x+fw/2-float32(len(valStr))*textSz*0.28, y+(fh-textSz)/2, textSz, colText)
 }
 
-func drawWidgetHistogram(w *layout.Widget, snap netdata.DataSnapshot, x, y, fw, fh float32) {
+func drawWidgetHistogram(w *layout.Widget, snap netdata.DataSnapshot, rings *LineRings, texCache *ChartTexCache, key string, x, y, fw, fh float32) {
 	dims, ok := snap[widgetSnapKey(w)]
 	if !ok || len(w.Dimensions) == 0 {
 		return
 	}
-	vals := make([]float64, 0, len(w.Dimensions))
+	vals := make(map[string]float64, len(w.Dimensions))
 	for _, d := range w.Dimensions {
 		if v, ok := dims[d]; ok {
-			vals = append(vals, v)
+			vals[d] = v
 		}
 	}
 	if len(vals) == 0 {
 		return
 	}
-	maxV := vals[0]
+
+	version := rings.Version(key)
+	tex := texCache.UpdateHistogram(key, vals, w.Dimensions, int32(fw), int32(fh), version)
+	if tex.ID == 0 {
+		// 回退：简单手绘柱状图
+		drawSimpleHistogram(vals, w.Dimensions, x, y, fw, fh)
+		return
+	}
+
+	src := rl.NewRectangle(0, 0, float32(tex.Width), -float32(tex.Height))
+	dst := rl.NewRectangle(x, y, fw, fh)
+	rl.DrawTexturePro(tex, src, dst, rl.NewVector2(0, 0), 0, tintWhite)
+}
+
+// drawSimpleHistogram 回退：无纹理时简单手绘。
+func drawSimpleHistogram(vals map[string]float64, dims []string, x, y, fw, fh float32) {
+	maxV := 1.0
 	for _, v := range vals {
 		if v > maxV {
 			maxV = v
 		}
 	}
-	if maxV <= 0 {
-		maxV = 1
-	}
-	bw := fw / float32(len(vals))
-	for i, v := range vals {
+	bw := fw / float32(len(dims))
+	for i, d := range dims {
+		v := vals[d]
 		h := float32(v/maxV) * (fh - 8)
 		bx := x + float32(i)*bw + 2
-		rl.DrawRectangle(int32(bx), int32(y+fh-h), int32(bw-4), int32(h), colAccent)
+		col := dimColors[i%len(dimColors)]
+		rl.DrawRectangleRounded(rl.NewRectangle(bx, y+fh-h, bw-4, h), 0.15, 4, col)
 	}
 }

@@ -40,7 +40,7 @@ func (c *Client) Probe(ctx context.Context) ProbeResult {
 		slurp, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return ProbeResult{Error: fmt.Sprintf("info HTTP %s: %s", resp.Status, strings.TrimSpace(string(slurp)))}
 	}
-	var info map[string]interface{}
+	var info map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
 		return ProbeResult{Error: "info json: " + err.Error()}
 	}
@@ -49,7 +49,7 @@ func (c *Client) Probe(ctx context.Context) ProbeResult {
 		ver = v
 	}
 	if ver == "" {
-		if m, ok := info["netdata"].(map[string]interface{}); ok {
+		if m, ok := info["netdata"].(map[string]any); ok {
 			if v, ok := m["version"].(string); ok {
 				ver = v
 			}

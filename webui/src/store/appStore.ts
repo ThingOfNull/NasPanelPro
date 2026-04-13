@@ -57,13 +57,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     const { layout } = get()
     if (!layout || oldId === newId) return
     const next = structuredClone(layout)
-    for (const scene of next.scenes) {
-      for (const w of scene.widgets) {
+    next.scenes.forEach((scene) => {
+      scene.widgets.forEach((w) => {
         if (w.node_id === oldId) {
           w.node_id = newId || undefined
         }
-      }
-    }
+      })
+    })
     set({ layout: next })
   },
 }))

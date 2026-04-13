@@ -13,11 +13,13 @@ export default function LayoutHardwareSection() {
     loadLayout().catch((e) => setStatus(String(e)))
   }, [loadLayout, setStatus])
 
-  const refreshLogs = () => {
-    api
-      .getLogs(400)
-      .then((r) => setLines(r.lines))
-      .catch(() => setLines([i18n.t('logs.readFailed')]))
+  const refreshLogs = async () => {
+    try {
+      const r = await api.getLogs(400)
+      setLines(r.lines)
+    } catch {
+      setLines([i18n.t('logs.readFailed')])
+    }
   }
 
   useEffect(() => {

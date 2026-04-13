@@ -6,24 +6,7 @@ import (
 	"strconv"
 )
 
-// NumericFromDimensionMeta 尝试从 charts 接口里 dimension 的 metadata 对象中抽出数值。
-// 说明：多数 Netdata 版本在 /charts 里维度值是描述性对象（name、multiplier 等），
-// 真正的测量值在 /api/v1/data；本函数用于少数扁平结构或后续扩展。
-func NumericFromDimensionMeta(entry DimensionEntry) (float64, bool) {
-	if entry == nil {
-		return 0, false
-	}
-	for _, key := range []string{"value", "last", "v"} {
-		if v, ok := entry[key]; ok {
-			if f, ok := toFloat64(v); ok {
-				return f, true
-			}
-		}
-	}
-	return 0, false
-}
-
-func toFloat64(v interface{}) (float64, bool) {
+func toFloat64(v any) (float64, bool) {
 	switch t := v.(type) {
 	case float64:
 		return t, true
@@ -51,7 +34,7 @@ func toFloat64(v interface{}) (float64, bool) {
 //	{ "labels": ["time", "dim1", "dim2"], "data": [[t, v1, v2], ...] }
 //
 // 返回最后一行中各维度列的 float64（跳过首列时间）；若 points=1 则只有一行。
-func ParseDataLabelsValues(payload map[string]interface{}) (cols map[string]float64, err error) {
+func ParseDataLabelsValues(payload map[string]any) (cols map[string]float64, err error) {
 	labelsRaw, ok := payload["labels"]
 	if !ok {
 		return nil, fmt.Errorf("missing labels")
@@ -64,11 +47,11 @@ func ParseDataLabelsValues(payload map[string]interface{}) (cols map[string]floa
 	if !ok {
 		return nil, fmt.Errorf("missing data")
 	}
-	rows, ok := dataRaw.([]interface{})
+	rows, ok := dataRaw.([]any)
 	if !ok || len(rows) == 0 {
 		return nil, fmt.Errorf("invalid data rows")
 	}
-	lastRow, ok := rows[len(rows)-1].([]interface{})
+	lastRow, ok := rows[len(rows)-1].([]any)
 	if !ok {
 		return nil, fmt.Errorf("invalid data row type")
 	}
@@ -85,7 +68,7 @@ func ParseDataLabelsValues(payload map[string]interface{}) (cols map[string]floa
 }
 
 // ParseDataTimeSeries 解析 /api/v1/data 中全部采样点（各维度一条序列，时间列在 labels[0]）。
-func ParseDataTimeSeries(payload map[string]interface{}) (*ChartDataSeries, error) {
+func ParseDataTimeSeries(payload map[string]any) (*ChartDataSeries, error) {
 	labelsRaw, ok := payload["labels"]
 	if !ok {
 		return nil, fmt.Errorf("missing labels")
@@ -98,7 +81,7 @@ func ParseDataTimeSeries(payload map[string]interface{}) (*ChartDataSeries, erro
 	if !ok {
 		return nil, fmt.Errorf("missing data")
 	}
-	rows, ok := dataRaw.([]interface{})
+	rows, ok := dataRaw.([]any)
 	if !ok || len(rows) == 0 {
 		return nil, fmt.Errorf("invalid data rows")
 	}
@@ -107,7 +90,7 @@ func ParseDataTimeSeries(payload map[string]interface{}) (*ChartDataSeries, erro
 		series[labels[i]] = make([]float64, 0, len(rows))
 	}
 	for _, row := range rows {
-		rowArr, ok := row.([]interface{})
+		rowArr, ok := row.([]any)
 		if !ok {
 			continue
 		}
@@ -132,8 +115,8 @@ func ParseDataTimeSeries(payload map[string]interface{}) (*ChartDataSeries, erro
 	return &ChartDataSeries{Labels: labels, Series: series, Latest: latest}, nil
 }
 
-func toStringSlice(v interface{}) ([]string, bool) {
-	a, ok := v.([]interface{})
+func toStringSlice(v any) ([]string, bool) {
+	a, ok := v.([]any)
 	if !ok {
 		return nil, false
 	}

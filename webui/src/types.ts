@@ -1,3 +1,6 @@
+// Field names use snake_case to match the backend JSON serialization (Go struct tags).
+// Renaming to camelCase would require changes across the full API layer.
+
 export interface NetdataNode {
   id: string
   name: string

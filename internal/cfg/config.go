@@ -5,7 +5,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // Config 可由环境变量覆盖（ApplyEnv）。
@@ -21,10 +20,9 @@ type Config struct {
 	RecoverSec   int
 	ChvtShield   int
 
-	FullScreen     bool
-	SampleInterval time.Duration
-	MaxTPS         int
-	RotateDeg      int
+	FullScreen bool
+	MaxTPS     int
+	RotateDeg  int
 
 	HTTPListenAddr string // 如 ":8090"；空为默认 :8090；"-" 关闭 HTTP
 	LayoutPath     string // 默认 configs/layout.json
@@ -43,9 +41,8 @@ func DefaultConfig() Config {
 		VCSConfirmN:    2,
 		RecoverSec:     30,
 		ChvtShield:     2000,
-		FullScreen:     true,
-		SampleInterval: time.Second,
-		MaxTPS:         30,
+		FullScreen:  true,
+		MaxTPS:      30,
 	}
 }
 

@@ -76,7 +76,7 @@ func (c *Client) FetchChartData(ctx context.Context, chart string, opts DataOpts
 		slurp, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 		return nil, fmt.Errorf("netdata data %s: HTTP %s: %s", chart, resp.Status, strings.TrimSpace(string(slurp)))
 	}
-	var root map[string]interface{}
+	var root map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&root); err != nil {
 		return nil, fmt.Errorf("chart %s: %w", chart, err)
 	}
@@ -105,7 +105,7 @@ func (c *Client) FetchChartSeries(ctx context.Context, chart string, opts DataOp
 		slurp, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 		return nil, fmt.Errorf("netdata data %s: HTTP %s: %s", chart, resp.Status, strings.TrimSpace(string(slurp)))
 	}
-	var root map[string]interface{}
+	var root map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&root); err != nil {
 		return nil, fmt.Errorf("chart %s: %w", chart, err)
 	}
@@ -161,11 +161,6 @@ func (c *Client) FetchChartsData(ctx context.Context, charts []string, opts Data
 		return nil, firstErr
 	}
 	return out, nil
-}
-
-// FlatKey 生成 chart.dimension 扁平键（dimension 中特殊字符原样保留）。
-func FlatKey(chartID, dimension string) string {
-	return chartID + "." + dimension
 }
 
 // Lookup 从快照中取单值；无则 ok=false。

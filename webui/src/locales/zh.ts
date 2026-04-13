@@ -75,6 +75,10 @@ const zh = {
     showYAxis: '折线纵轴',
     hideLabelBanner: '隐藏标题条',
     linePoints: '折线采样点数',
+    addScene: '新建场景',
+    groupDataBinding: '数据绑定',
+    groupLayout: '几何布局',
+    groupAppearance: '外观样式',
   },
   chartPreview: {
     textDefault: '文本',

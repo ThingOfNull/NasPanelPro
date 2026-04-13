@@ -64,8 +64,10 @@ func Run(ctx context.Context, opt Options) error {
 
 	detachStdinFromTTY()
 
+	// 开启 MSAA 4× 抗锯齿（须在 InitWindow 之前设置）
+	rl.SetConfigFlags(rl.FlagMsaa4xHint)
 	if c.FullScreen {
-		rl.SetConfigFlags(rl.FlagFullscreenMode | rl.FlagWindowUndecorated)
+		rl.SetConfigFlags(rl.FlagMsaa4xHint | rl.FlagFullscreenMode | rl.FlagWindowUndecorated)
 	}
 	rl.InitWindow(initW, initH, "NAS Panel (DRM)")
 	defer func() {
@@ -109,6 +111,7 @@ func Run(ctx context.Context, opt Options) error {
 
 	rings := NewLineRings(60)
 	sceneMgr := NewSceneManager(lc0)
+	texCache := NewChartTexCache()
 
 	poller := NewPoller("")
 	poller.SetPlan(func() []PollTarget {
@@ -143,6 +146,7 @@ func Run(ctx context.Context, opt Options) error {
 						opt.LayoutStore.Put(loaded)
 						layoutModTime = st.ModTime()
 						InitPanelUIFont(&loaded)
+						texCache.UnloadAll() // layout 重载时释放所有缓存纹理
 					}
 				}
 			}
@@ -193,7 +197,7 @@ func Run(ctx context.Context, opt Options) error {
 		drawToTexture := func(tex rl.RenderTexture2D, si int) {
 			rl.BeginTextureMode(tex)
 			rl.ClearBackground(colBackground)
-			drawScene(lc, si, snap, rings, logicW, logicH)
+			drawScene(lc, si, snap, rings, texCache, logicW, logicH)
 			rl.EndTextureMode()
 		}
 
@@ -227,7 +231,7 @@ func Run(ctx context.Context, opt Options) error {
 		if rot != 0 {
 			rl.BeginTextureMode(rt)
 			rl.ClearBackground(colBackground)
-			drawScene(lc, si, snap, rings, logicW, logicH)
+			drawScene(lc, si, snap, rings, texCache, logicW, logicH)
 			rl.EndTextureMode()
 			rl.BeginDrawing()
 			rl.ClearBackground(colBackground)
@@ -240,7 +244,7 @@ func Run(ctx context.Context, opt Options) error {
 		} else {
 			rl.BeginDrawing()
 			rl.ClearBackground(colBackground)
-			drawScene(lc, si, snap, rings, logicW, logicH)
+			drawScene(lc, si, snap, rings, texCache, logicW, logicH)
 			rl.EndDrawing()
 		}
 	}

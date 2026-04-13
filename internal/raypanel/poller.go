@@ -61,8 +61,7 @@ func (p *Poller) SetBaseURL(url string) {
 	p.client.BaseURL = p.baseURL
 }
 
-// SetCharts Plan 为 nil 时使用。
-// SetLineFill 在轮询 tick 内刷新折线序列（layoutScenes 返回当前布局与参与轮询的场景下标）。
+// SetLineFill 在轮询 tick 内刷新折线序列；layoutScenes 返回当前布局与参与轮询的场景下标。
 func (p *Poller) SetLineFill(rings *LineRings, layoutScenes func() (*layout.LayoutConfig, []int), ns LineNodeStore) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -71,6 +70,7 @@ func (p *Poller) SetLineFill(rings *LineRings, layoutScenes func() (*layout.Layo
 	p.lineNodeStore = ns
 }
 
+// SetCharts 设置需要轮询的 chart ID 列表；Plan 为 nil 时使用。
 func (p *Poller) SetCharts(ids []string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -87,14 +87,6 @@ func (p *Poller) SetCharts(ids []string) {
 		out = append(out, id)
 	}
 	p.charts = out
-}
-
-func (p *Poller) chartsCopy() []string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	out := make([]string, len(p.charts))
-	copy(out, p.charts)
-	return out
 }
 
 // Snapshot 返回最近一次成功的数据快照。
@@ -194,14 +186,6 @@ func (p *Poller) Run(ctx context.Context, interval time.Duration) {
 			p.refreshLineRings(ctx)
 		}
 	}
-}
-
-// ChartsForLayoutScene 从布局提取某场景的 chart id。
-func ChartsForLayoutScene(lc *layout.LayoutConfig, sceneIndex int) []string {
-	if lc == nil {
-		return nil
-	}
-	return lc.ChartsUsedInScene(sceneIndex)
 }
 
 // ChartsForLayoutScenes 合并多场景的 chart（去重）。

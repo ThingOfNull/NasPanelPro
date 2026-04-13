@@ -362,7 +362,7 @@ func Start(ctx context.Context, opt Options) error {
 	}()
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			gin.DefaultWriter.Write([]byte("server: " + err.Error() + "\n"))
+			_, _ = gin.DefaultWriter.Write([]byte("server: " + err.Error() + "\n"))
 		}
 	}()
 	return nil

@@ -25,7 +25,7 @@ type ChartDef struct {
 }
 
 // DimensionEntry 为 dimensions 下单个键的值；可能是 {"name":"user"} 或带 multiplier 等字段。
-type DimensionEntry map[string]interface{}
+type DimensionEntry map[string]any
 
 // UnmarshalJSON 允许 dimensions 中值为任意 JSON 对象并展平为 map。
 func (d *DimensionEntry) UnmarshalJSON(b []byte) error {
@@ -33,7 +33,7 @@ func (d *DimensionEntry) UnmarshalJSON(b []byte) error {
 		*d = nil
 		return nil
 	}
-	var m map[string]interface{}
+	var m map[string]any
 	if err := json.Unmarshal(b, &m); err != nil {
 		return err
 	}

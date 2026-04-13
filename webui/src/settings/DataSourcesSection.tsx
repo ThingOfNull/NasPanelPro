@@ -113,7 +113,7 @@ export default function DataSourcesSection() {
           </thead>
           <tbody>
             {nodes.map((n, i) => (
-              <tr key={n.id + i} className="border-t border-zinc-800">
+              <tr key={n.id || i} className="border-t border-zinc-800">
                 <td className="p-2">
                   <input
                     className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1"
