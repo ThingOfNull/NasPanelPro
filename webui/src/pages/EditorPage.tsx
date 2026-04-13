@@ -13,12 +13,19 @@ import type { ListChildComponentProps } from 'react-window'
 import WidgetChartPreview from '../components/WidgetChartPreview'
 import { api } from '../api'
 import { newWidgetId } from '../lib/id'
+import { validateLayoutConfig } from '../layoutValidate'
 import { useAppStore } from '../store/appStore'
 import type { ChartDiscoveryRow, Widget } from '../types'
+import { widgetAllowsMultiDims, widgetAllowsMultiExpr } from '../widgetCaps'
 
 const SNAP = 8
 const snap = (v: number) => Math.round(v / SNAP) * SNAP
 const HANDLE = 8
+
+/** 仅按英文半角逗号切分；用于保存到 layout 的 dimensions 数组（不含尾随空段）。 */
+function parseDimensionsCommaInput(s: string): string[] {
+  return s.split(',').map((x) => x.trim()).filter((p) => p.length > 0)
+}
 
 function applyResize(
   orig: { x: number; y: number; w: number; h: number },
@@ -121,6 +128,19 @@ function PropLabel({ label, children }: { label: string; children: React.ReactNo
 export default function EditorPage() {
   const { t } = useTranslation()
   const { layout, setLayout, loadLayout, saveLayout, nodes, loadNodes, setStatus } = useAppStore()
+
+  const saveLayoutValidated = useCallback(() => {
+    const l = useAppStore.getState().layout
+    if (!l) {
+      return
+    }
+    const err = validateLayoutConfig(l)
+    if (err) {
+      setStatus(err)
+      return
+    }
+    saveLayout().catch((e) => setStatus(String(e)))
+  }, [saveLayout, setStatus])
   const [sceneIdx, setSceneIdx] = useState(0)
   const [sel, setSel] = useState<{ si: number; wi: number } | null>(null)
   const [scale, setScale] = useState(0.88)
@@ -128,6 +148,8 @@ export default function EditorPage() {
   const [searchQ, setSearchQ] = useState('')
   const [allRows, setAllRows] = useState<ChartDiscoveryRow[]>([])
   const [filteredIdx, setFilteredIdx] = useState<number[]>([])
+  const [dimsDraft, setDimsDraft] = useState('')
+  const prevDimsSelRef = useRef<{ si: number; wi: number } | null>(null)
   const workerRef = useRef<Worker | null>(null)
   const searchT = useRef<ReturnType<typeof setTimeout>>(null)
 
@@ -280,6 +302,27 @@ export default function EditorPage() {
 
   const selectedW = layout && sel ? layout.scenes[sel.si]?.widgets[sel.wi] : undefined
 
+  // dimensions 输入框：用草稿字符串展示，避免「user,」被 split+filter 立刻吃掉半角逗号（见下方 parse）。
+  useEffect(() => {
+    if (!layout || !sel) {
+      setDimsDraft('')
+      prevDimsSelRef.current = null
+      return
+    }
+    const w = layout.scenes[sel.si]?.widgets[sel.wi]
+    const prev = prevDimsSelRef.current
+    const selChanged = !prev || prev.si !== sel.si || prev.wi !== sel.wi
+    prevDimsSelRef.current = { si: sel.si, wi: sel.wi }
+    if (!selChanged) {
+      return
+    }
+    if (!w) {
+      setDimsDraft('')
+      return
+    }
+    setDimsDraft((w.dimensions ?? []).join(','))
+  }, [layout, sel])
+
   const [listH, setListH] = useState(420)
   useEffect(() => {
     const fn = () => setListH(Math.max(200, window.innerHeight - 220))
@@ -346,7 +389,7 @@ export default function EditorPage() {
           </button>
           <button type="button"
             className="ml-2 px-3 py-1 rounded bg-emerald-700 hover:bg-emerald-600 text-sm transition-colors"
-            onClick={() => saveLayout().catch((e) => setStatus(String(e)))}>
+            onClick={() => saveLayoutValidated()}>
             {t('editor.saveLayout')}
           </button>
           <label className="text-xs text-zinc-500 ml-2 flex items-center gap-1">
@@ -452,27 +495,133 @@ export default function EditorPage() {
                         value={selectedW.chart_id ?? ''}
                         onChange={(e) => updateSelected({ chart_id: e.target.value })} />
                     </PropLabel>
-                    <PropLabel label={t('editor.dimensionsHint')}>
-                      <input
-                        className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs"
-                        value={(selectedW.dimensions ?? []).join(',')}
-                        onChange={(e) => updateSelected({
-                          dimensions: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
-                        })} />
-                    </PropLabel>
-                    {dimOpts.length > 0 && (
-                      <div className="space-y-1">
-                        <div className="text-[10px] text-zinc-600">{t('editor.dimQuick')}</div>
-                        <div className="flex flex-wrap gap-1">
-                          {dimOpts.map((d) => (
-                            <button key={d} type="button"
-                              className="px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-[10px] border border-zinc-700"
-                              onClick={() => updateSelected({ dimensions: [d] })}>
-                              {d}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
+                    {(selectedW.chart_id ?? '').trim() !== '' && (
+                      <>
+                        <label className="flex items-start gap-2 text-xs text-zinc-400 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            className="mt-0.5 shrink-0"
+                            checked={!!selectedW.composite_dims_expr}
+                            onChange={(e) => {
+                              const on = e.target.checked
+                              if (on) {
+                                setDimsDraft('')
+                                updateSelected({
+                                  composite_dims_expr: true,
+                                  dimensions: [],
+                                })
+                              } else {
+                                const dimArr = parseDimensionsCommaInput(dimsDraft)
+                                const fallback =
+                                  selectedW.type === 'text'
+                                    ? (dimArr.length > 0 ? dimArr : [])
+                                    : (dimArr.length > 0 ? dimArr : ['user'])
+                                updateSelected({
+                                  composite_dims_expr: false,
+                                  value_expr: undefined,
+                                  dimensions: fallback,
+                                })
+                                setDimsDraft(fallback.join(','))
+                              }
+                            }}
+                          />
+                          <span>
+                            <span className="block text-zinc-300">{t('editor.compositeDimsExpr')}</span>
+                            <span className="block text-[10px] text-zinc-600 mt-0.5 leading-snug">
+                              {t('editor.compositeDimsExprHint')}
+                            </span>
+                          </span>
+                        </label>
+                        <PropLabel label={t('editor.dimensionsHint')}>
+                          <input
+                            type="text"
+                            inputMode="text"
+                            autoComplete="off"
+                            spellCheck={false}
+                            readOnly={!!selectedW.composite_dims_expr}
+                            className={`w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs ${
+                              selectedW.composite_dims_expr ? 'opacity-60 cursor-not-allowed' : ''
+                            }`}
+                            value={dimsDraft}
+                            onChange={(e) => {
+                              const v = e.target.value
+                              if (!widgetAllowsMultiDims(selectedW.type) && v.includes(',')) {
+                                setStatus(t('editor.toastMultiDim'))
+                                return
+                              }
+                              setDimsDraft(v)
+                              updateSelected({ dimensions: parseDimensionsCommaInput(v) })
+                            }}
+                          />
+                        </PropLabel>
+                        {dimOpts.length > 0 && !selectedW.composite_dims_expr && (
+                          <div className="space-y-1">
+                            <div className="text-[10px] text-zinc-600">{t('editor.dimQuick')}</div>
+                            <div className="flex flex-wrap gap-1">
+                              {dimOpts.map((d) => (
+                                <button key={d} type="button"
+                                  className="px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-[10px] border border-zinc-700"
+                                  onClick={() => {
+                                    setDimsDraft(d)
+                                    updateSelected({ dimensions: [d] })
+                                  }}>
+                                  {d}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {selectedW.composite_dims_expr && (
+                          <PropLabel label={t('editor.valueExprLabel')}>
+                            <textarea
+                              rows={selectedW.type === 'histogram' ? 4 : 2}
+                              className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 font-mono text-[11px] leading-snug"
+                              placeholder={t('editor.valueExprPlaceholder')}
+                              value={selectedW.value_expr ?? ''}
+                              onChange={(e) => {
+                                let v = e.target.value
+                                if (!widgetAllowsMultiExpr(selectedW.type) && v.includes('\n')) {
+                                  v = (v.split('\n')[0] ?? '').trimEnd()
+                                  setStatus(t('editor.toastMultiLine'))
+                                }
+                                updateSelected({
+                                  value_expr: v === '' ? undefined : v,
+                                })
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !widgetAllowsMultiExpr(selectedW.type)) {
+                                  e.preventDefault()
+                                  setStatus(t('editor.toastMultiLine'))
+                                }
+                              }}
+                            />
+                            <div className="text-[10px] text-zinc-600 mt-0.5">
+                              {t('editor.valueExprHintComposite')}
+                            </div>
+                          </PropLabel>
+                        )}
+                      </>
+                    )}
+                    {(selectedW.chart_id ?? '').trim() === '' && (
+                      <PropLabel label={t('editor.dimensionsHint')}>
+                        <input
+                          type="text"
+                          inputMode="text"
+                          autoComplete="off"
+                          spellCheck={false}
+                          className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs"
+                          value={dimsDraft}
+                          onChange={(e) => {
+                            const v = e.target.value
+                            if (!widgetAllowsMultiDims(selectedW.type) && v.includes(',')) {
+                              setStatus(t('editor.toastMultiDim'))
+                              return
+                            }
+                            setDimsDraft(v)
+                            updateSelected({ dimensions: parseDimensionsCommaInput(v) })
+                          }}
+                        />
+                      </PropLabel>
                     )}
                   </PropGroup>
 

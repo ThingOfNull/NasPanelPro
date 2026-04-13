@@ -51,3 +51,25 @@ func TestValidate_sceneDurationNegative(t *testing.T) {
 		t.Fatal("expected error for negative scene duration")
 	}
 }
+
+func TestValidate_valueExprOk(t *testing.T) {
+	c := DefaultLayout()
+	w := &c.Scenes[0].Widgets[1]
+	w.Dimensions = nil
+	w.CompositeDimsExpr = true
+	w.ValueExpr = "user + system"
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidate_valueExprInvalid(t *testing.T) {
+	c := DefaultLayout()
+	w := &c.Scenes[0].Widgets[1]
+	w.Dimensions = nil
+	w.CompositeDimsExpr = true
+	w.ValueExpr = "1 +"
+	if err := c.Validate(); err == nil {
+		t.Fatal("expected error for invalid value_expr")
+	}
+}

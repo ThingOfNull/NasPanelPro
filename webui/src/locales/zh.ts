@@ -64,7 +64,7 @@ const zh = {
     props: '属性',
     selectWidget: '点击画布上的组件',
     nodeIdDefault: '默认节点',
-    dimensionsHint: 'dimensions（逗号）',
+    dimensionsHint: 'dimensions（英文半角逗号 , 分隔）',
     dimQuick: '快捷维度',
     xywh: 'x y w h',
     colorLabel: '颜色 #RRGGBB',
@@ -79,6 +79,17 @@ const zh = {
     groupDataBinding: '数据绑定',
     groupLayout: '几何布局',
     groupAppearance: '外观样式',
+    valueExprLabel: '数值表达式',
+    valueExprPlaceholder: '例如 used / (used + free) * 100',
+    valueExprHint:
+      '非空时按表达式从上方 dimensions 取值；空则仍用首个可用维度。与后端 expr 语法一致。',
+    compositeDimsExpr: '复合维度表达式',
+    compositeDimsExprHint:
+      '开启后仅使用下方表达式，dimensions 留空；关闭后仅使用 dimensions，表达式须清空。与「普通维度」二选一。',
+    valueExprHintComposite:
+      '换行分隔多条（仅直方图可多行）；其它类型仅首行。变量名须与图表维度一致。',
+    toastMultiDim: '该图表类型仅支持单一维度，不能使用英文逗号分隔多个维度。',
+    toastMultiLine: '该图表类型仅支持单行表达式，不能换行。',
   },
   chartPreview: {
     textDefault: '文本',

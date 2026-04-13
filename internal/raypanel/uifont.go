@@ -76,6 +76,9 @@ func buildCodepointRunes(lc *layout.LayoutConfig, maxGlyphs int) []rune {
 				for _, r := range w.Format {
 					add(r)
 				}
+				for _, r := range w.ValueExpr {
+					add(r)
+				}
 			}
 		}
 	}

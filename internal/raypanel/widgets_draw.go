@@ -3,9 +3,11 @@ package raypanel
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 
 	"naspanel/internal/layout"
+	"naspanel/internal/metricexpr"
 	"naspanel/internal/netdata"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -25,6 +27,31 @@ func widgetPrimaryValue(snap netdata.DataSnapshot, w *layout.Widget) (float64, b
 	dims, ok := snap[widgetSnapKey(w)]
 	if !ok {
 		return 0, false
+	}
+	if w.CompositeDimsExpr {
+		lines := metricexpr.NonEmptyExprLines(w.ValueExpr)
+		if len(lines) == 0 {
+			return 0, false
+		}
+		line := lines[0]
+		ids, err := metricexpr.CompositeEnvDimensionIDs(lines)
+		if err != nil {
+			return 0, false
+		}
+		env := make(map[string]float64)
+		for _, id := range ids {
+			if v, ok := dims[id]; ok {
+				env[id] = v
+			}
+		}
+		if len(env) == 0 {
+			return 0, false
+		}
+		v, err := metricexpr.EvalScalar(line, env)
+		if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
+			return 0, false
+		}
+		return v, true
 	}
 	for _, d := range w.Dimensions {
 		if v, ok := dims[d]; ok {
@@ -48,6 +75,28 @@ func formatVal(v float64, unit string) string {
 }
 
 // formatValCompact 用于纵轴窄栏。
+// finiteMinMax 忽略 NaN/Inf，若无有限值则 ok=false。
+func finiteMinMax(pts []float64) (minV, maxV float64, ok bool) {
+	first := true
+	for _, p := range pts {
+		if math.IsNaN(p) || math.IsInf(p, 0) {
+			continue
+		}
+		if first {
+			minV, maxV = p, p
+			first = false
+			continue
+		}
+		if p < minV {
+			minV = p
+		}
+		if p > maxV {
+			maxV = p
+		}
+	}
+	return minV, maxV, !first
+}
+
 func formatValCompact(v float64, unit string) string {
 	switch strings.ToLower(strings.TrimSpace(unit)) {
 	case "percent":
@@ -221,7 +270,32 @@ func gaugeArcAngles(arcDeg int) (start, end float32) {
 func drawWidgetGauge(w *layout.Widget, snap netdata.DataSnapshot, x, y, fw, fh float32) {
 	v, ok := widgetPrimaryValue(snap, w)
 	if !ok {
-		v = 0
+		arcDeg := w.GaugeArcDegrees
+		if arcDeg != 270 {
+			arcDeg = 180
+		}
+		spanStart, spanEnd := gaugeArcAngles(arcDeg)
+		cx := x + fw/2
+		var cy float32
+		if arcDeg == 270 {
+			cy = y + fh/2
+		} else {
+			cy = y + fh*0.60
+		}
+		r := float32(math.Min(float64(fw), float64(fh))) * 0.38
+		if arcDeg == 270 {
+			r = float32(math.Min(float64(fw), float64(fh))) * 0.42
+		}
+		inner := r * 0.68
+		// thick := r - inner
+		rl.DrawRingLines(rl.NewVector2(cx, cy), inner, r, spanStart, spanEnd, 48, colBarTrack)
+		cardW := float32(52)
+		cardH := float32(22)
+		cardX := cx - cardW/2
+		cardY := cy - cardH/2
+		rl.DrawRectangleRounded(rl.NewRectangle(cardX, cardY, cardW, cardH), 0.4, 8, colPanel)
+		drawUIText(panelUIFont, panelUIFontOk, "—", cardX+cardW/2-6, cardY+3, 14, colText)
+		return
 	}
 	if strings.EqualFold(w.Unit, "percent") {
 		// 已是 0-100，直接使用
@@ -311,13 +385,10 @@ func drawWidgetLine(w *layout.Widget, rings *LineRings, texCache *ChartTexCache,
 		return
 	}
 
-	// 构建多维度 map（单维度兼容）
-	dim := ""
-	if len(w.Dimensions) > 0 {
-		dim = w.Dimensions[0]
-	}
-	if dim == "" {
-		dim = "value"
+	// 构建多维度 map（单维度兼容）；复合表达式结果用统一维度名
+	dim := "value"
+	if !w.CompositeDimsExpr && len(w.Dimensions) > 0 && strings.TrimSpace(w.Dimensions[0]) != "" {
+		dim = strings.TrimSpace(w.Dimensions[0])
 	}
 	ptsMap := map[string][]float64{dim: pts}
 	dims := []string{dim}
@@ -335,14 +406,9 @@ func drawWidgetLine(w *layout.Widget, rings *LineRings, texCache *ChartTexCache,
 
 	// Y 轴刻度（叠加在纹理之上）
 	if w.ShowYAxis {
-		var minV, maxV float64 = pts[0], pts[0]
-		for _, p := range pts {
-			if p < minV {
-				minV = p
-			}
-			if p > maxV {
-				maxV = p
-			}
+		minV, maxV, ok := finiteMinMax(pts)
+		if !ok {
+			minV, maxV = 0, 1
 		}
 		sMax := formatValCompact(maxV, w.Unit)
 		sMid := formatValCompact((minV+maxV)/2, w.Unit)
@@ -360,14 +426,9 @@ func drawSimpleLine(pts []float64, x, y, fw, fh float32) {
 	if ph < 4 {
 		ph = 4
 	}
-	minV, maxV := pts[0], pts[0]
-	for _, p := range pts {
-		if p < minV {
-			minV = p
-		}
-		if p > maxV {
-			maxV = p
-		}
+	minV, maxV, ok := finiteMinMax(pts)
+	if !ok {
+		return
 	}
 	if maxV == minV {
 		maxV = minV + 1
@@ -381,16 +442,32 @@ func drawSimpleLine(pts []float64, x, y, fw, fh float32) {
 		den = 1
 	}
 	for i := 1; i < len(pts); i++ {
+		a, b := pts[i-1], pts[i]
+		if math.IsNaN(a) || math.IsNaN(b) || math.IsInf(a, 0) || math.IsInf(b, 0) {
+			continue
+		}
 		x0 := int32(x + float32(i-1)/den*fw)
 		x1 := int32(x + float32(i)/den*fw)
-		rl.DrawLine(x0, pyFn(pts[i-1]), x1, pyFn(pts[i]), colAccent)
+		rl.DrawLine(x0, pyFn(a), x1, pyFn(b), colAccent)
 	}
 }
 
 func drawWidgetProgress(w *layout.Widget, snap netdata.DataSnapshot, x, y, fw, fh float32) {
 	v, ok := widgetPrimaryValue(snap, w)
 	if !ok {
-		v = 0
+		roundness := float32(0.35)
+		segments := int32(8)
+		trackRect := rl.NewRectangle(x, y, fw, fh)
+		rl.DrawRectangleRounded(trackRect, roundness, segments, colBarTrack)
+		textSz := float32(fh * 0.55)
+		if textSz < 10 {
+			textSz = 10
+		}
+		if textSz > 18 {
+			textSz = 18
+		}
+		drawUIText(panelUIFont, panelUIFontOk, "—", x+fw/2-4, y+(fh-textSz)/2, textSz, colText)
+		return
 	}
 	p := v
 	if strings.EqualFold(w.Unit, "percent") {
@@ -444,9 +521,54 @@ func drawWidgetProgress(w *layout.Widget, snap netdata.DataSnapshot, x, y, fw, f
 
 func drawWidgetHistogram(w *layout.Widget, snap netdata.DataSnapshot, rings *LineRings, texCache *ChartTexCache, key string, x, y, fw, fh float32) {
 	dims, ok := snap[widgetSnapKey(w)]
-	if !ok || len(w.Dimensions) == 0 {
+	if !ok {
 		return
 	}
+	if w.CompositeDimsExpr {
+		lines := metricexpr.NonEmptyExprLines(w.ValueExpr)
+		if len(lines) == 0 {
+			return
+		}
+		ids, err := metricexpr.CompositeEnvDimensionIDs(lines)
+		if err != nil {
+			return
+		}
+		env := make(map[string]float64)
+		for _, id := range ids {
+			if v, ok := dims[id]; ok {
+				env[id] = v
+			}
+		}
+		if len(env) == 0 {
+			return
+		}
+		vals := make(map[string]float64)
+		var dimNames []string
+		for i, line := range lines {
+			v, err := metricexpr.EvalScalar(line, env)
+			if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
+				return
+			}
+			k := strconv.Itoa(i)
+			vals[k] = v
+			dimNames = append(dimNames, k)
+		}
+		version := rings.Version(key)
+		tex := texCache.UpdateHistogram(key, vals, dimNames, int32(fw), int32(fh), version)
+		if tex.ID == 0 {
+			drawSimpleHistogram(vals, dimNames, x, y, fw, fh)
+			return
+		}
+		src := rl.NewRectangle(0, 0, float32(tex.Width), -float32(tex.Height))
+		dst := rl.NewRectangle(x, y, fw, fh)
+		rl.DrawTexturePro(tex, src, dst, rl.NewVector2(0, 0), 0, tintWhite)
+		return
+	}
+
+	if len(w.Dimensions) == 0 {
+		return
+	}
+
 	vals := make(map[string]float64, len(w.Dimensions))
 	for _, d := range w.Dimensions {
 		if v, ok := dims[d]; ok {

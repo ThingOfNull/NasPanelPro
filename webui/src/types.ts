@@ -30,6 +30,10 @@ export interface Widget {
   h: number
   chart_id?: string
   dimensions?: string[]
+  /** true：仅用 value_expr；false：仅用 dimensions；缺省为 false */
+  composite_dims_expr?: boolean
+  /** 复合模式下为多行表达式（换行分隔） */
+  value_expr?: string
   node_id?: string
   data?: WidgetDataRef
   label?: string

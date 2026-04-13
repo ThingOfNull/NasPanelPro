@@ -64,7 +64,7 @@ const en = {
     props: 'Properties',
     selectWidget: 'Select a widget on the canvas',
     nodeIdDefault: 'Default node',
-    dimensionsHint: 'dimensions (comma-separated)',
+    dimensionsHint: 'dimensions (half-width comma ,)',
     dimQuick: 'Dimensions',
     xywh: 'x y w h',
     colorLabel: 'Color #RRGGBB',
@@ -79,6 +79,17 @@ const en = {
     groupDataBinding: 'Data Binding',
     groupLayout: 'Layout',
     groupAppearance: 'Appearance',
+    valueExprLabel: 'Value expression',
+    valueExprPlaceholder: 'e.g. used / (used + free) * 100',
+    valueExprHint:
+      'When set, values are computed from dimensions above; when empty, the first available dimension is used. Uses expr syntax (same as backend).',
+    compositeDimsExpr: 'Composite dimension expression',
+    compositeDimsExprHint:
+      'When enabled, only the expression below is used and dimensions stay empty; when disabled, only dimensions are used and the expression must be cleared. Mutually exclusive with plain dimensions.',
+    valueExprHintComposite:
+      'Multiple lines separated by newlines (histogram only); other types use the first line only. Variable names must match chart dimensions.',
+    toastMultiDim: 'This chart type allows only one dimension; multiple comma-separated dimensions are not supported.',
+    toastMultiLine: 'This chart type allows only a single-line expression; line breaks are not supported.',
   },
   chartPreview: {
     textDefault: 'Text',

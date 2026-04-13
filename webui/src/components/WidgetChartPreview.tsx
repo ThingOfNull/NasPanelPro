@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '../api'
+import {
+  buildLatestEnvForComposite,
+  buildSeriesForComposite,
+  evalScalar,
+  evalSeries,
+  nonEmptyExprLines,
+} from '../metricexpr'
 import type { Widget } from '../types'
 
 export type ChartSeriesPayload = {
@@ -169,7 +176,16 @@ export default function WidgetChartPreview({
     tick()
     const id = window.setInterval(tick, 8000)
     return () => { cancelled = true; window.clearInterval(id) }
-  }, [w.type, w.chart_id, w.node_id, fallbackNodeId, nodeId])
+  }, [
+    w.type,
+    w.chart_id,
+    w.node_id,
+    fallbackNodeId,
+    nodeId,
+    w.value_expr,
+    w.composite_dims_expr,
+    w.dimensions?.join('\x1e'),
+  ])
 
   if (w.type === 'text') {
     return (
@@ -195,9 +211,31 @@ export default function WidgetChartPreview({
     )
   }
 
-  const dim = pickDim(w, payload.latest)
-  const val = dim !== undefined ? payload.latest[dim] : NaN
-  const pts = dim && payload.series[dim] ? payload.series[dim] : []
+  const composite = !!w.composite_dims_expr
+  const exprLines = composite ? nonEmptyExprLines(w.value_expr ?? '') : []
+  const firstLine = exprLines[0] ?? ''
+  let val: number = NaN
+  let pts: number[] = []
+  if (composite && firstLine) {
+    try {
+      const env = buildLatestEnvForComposite(payload.latest, exprLines)
+      val = evalScalar(firstLine, env)
+    } catch {
+      val = NaN
+    }
+    if (w.type === 'line') {
+      try {
+        const sub = buildSeriesForComposite(payload.series, exprLines)
+        pts = evalSeries(firstLine, sub)
+      } catch {
+        pts = []
+      }
+    }
+  } else if (!composite) {
+    const dim = pickDim(w, payload.latest)
+    val = dim !== undefined ? payload.latest[dim] : NaN
+    pts = dim && payload.series[dim] ? payload.series[dim] : []
+  }
 
   // ── Gauge ──────────────────────────────────────────────────────────────────
   if (w.type === 'gauge') {
@@ -225,6 +263,13 @@ export default function WidgetChartPreview({
   }
 
   // ── Line ───────────────────────────────────────────────────────────────────
+  if (w.type === 'line' && pts.length < 2) {
+    return (
+      <div className="flex items-center justify-center h-full text-zinc-600 text-[10px]">
+        {t('chartPreview.noData')}
+      </div>
+    )
+  }
   if (w.type === 'line' && pts.length > 1) {
     const W = 100, H = 100
     let minV = pts[0], maxV = pts[0]
@@ -259,6 +304,13 @@ export default function WidgetChartPreview({
 
   // ── Progress ───────────────────────────────────────────────────────────────
   if (w.type === 'progress') {
+    if (composite && !Number.isFinite(val)) {
+      return (
+        <div className="flex items-center justify-center h-full text-zinc-600 text-[10px]">
+          {t('chartPreview.noData')}
+        </div>
+      )
+    }
     const maxV = w.unit === 'percent' ? 100 : Math.max(1, Number.isFinite(val) ? Math.abs(val) : 1)
     const tFill = clamp01(val, maxV)
     const fillColor = ACCENT
@@ -291,6 +343,40 @@ export default function WidgetChartPreview({
 
   // ── Histogram ──────────────────────────────────────────────────────────────
   if (w.type === 'histogram') {
+    if (composite && exprLines.length === 0) {
+      return (
+        <div className="flex items-center justify-center h-full text-zinc-600 text-[10px]">
+          {t('chartPreview.noData')}
+        </div>
+      )
+    }
+    if (composite && exprLines.length > 0) {
+      const env = buildLatestEnvForComposite(payload.latest, exprLines)
+      const vals = exprLines.map((line) => {
+        try {
+          const x = evalScalar(line, env)
+          return Number.isFinite(x) ? Math.abs(x) : 0
+        } catch {
+          return 0
+        }
+      })
+      const mx = Math.max(1, ...vals)
+      const n = vals.length || 1
+      const gap = 3
+      const bw = Math.max(4, (100 - 16 - gap * (n - 1)) / n)
+      return (
+        <svg className="w-full h-full" viewBox="0 0 100 60" preserveAspectRatio="none">
+          {vals.map((v, i) => {
+            const bh = (Math.abs(v) / mx) * 48
+            const bx = 8 + i * (bw + gap)
+            return (
+              <rect key={i} x={bx} y={56 - bh} width={bw} height={Math.max(2, bh)}
+                fill={DIM_COLORS[i % DIM_COLORS.length]} rx="2" />
+            )
+          })}
+        </svg>
+      )
+    }
     const dims = (w.dimensions?.length ? w.dimensions : Object.keys(payload.latest)).slice(0, 6)
     const vals = dims.map((d) => payload.latest[d] ?? 0)
     const mx = Math.max(1, ...vals.map(Math.abs))

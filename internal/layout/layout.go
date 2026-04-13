@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"naspanel/internal/metricexpr"
 )
 
 // LayoutSettings 与 WebUI PRD `settings` 块对应（可嵌在 layout.json）。
@@ -65,6 +67,10 @@ type Widget struct {
 	H          float64    `json:"h"`
 	ChartID    string     `json:"chart_id,omitempty"`
 	Dimensions []string   `json:"dimensions,omitempty"`
+	// ValueExpr 复合模式下为表达式（可多行）；非复合模式须为空。
+	ValueExpr string `json:"value_expr,omitempty"`
+	// CompositeDimsExpr 为 true 时仅使用 value_expr，dimensions 须为空；为 false 时仅使用 dimensions，value_expr 须为空。
+	CompositeDimsExpr bool `json:"composite_dims_expr,omitempty"`
 	// 文本类：静态文案或 format 模板
 	Label  string `json:"label,omitempty"`
 	Format string `json:"format,omitempty"` // 如 "{{.Value}}%" 简化期可只用 label+单 dimension
@@ -201,6 +207,31 @@ func (c *LayoutConfig) Validate() error {
 	return nil
 }
 
+func widgetHasDimensionList(w *Widget) bool {
+	if w == nil {
+		return false
+	}
+	for _, d := range w.Dimensions {
+		if strings.TrimSpace(d) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func widgetDimensionCount(w *Widget) int {
+	if w == nil {
+		return 0
+	}
+	n := 0
+	for _, d := range w.Dimensions {
+		if strings.TrimSpace(d) != "" {
+			n++
+		}
+	}
+	return n
+}
+
 func validateWidget(w *Widget) error {
 	switch w.Type {
 	case WidgetText, WidgetGauge, WidgetLine, WidgetProgress, WidgetHistogram:
@@ -212,17 +243,69 @@ func validateWidget(w *Widget) error {
 	if w.W <= 0 || w.H <= 0 {
 		return errors.New("widget w/h must be positive")
 	}
+
+	composite := w.CompositeDimsExpr
+	hasDims := widgetHasDimensionList(w)
+	veTrim := strings.TrimSpace(w.ValueExpr)
+	lines := metricexpr.NonEmptyExprLines(w.ValueExpr)
+
+	if composite && hasDims {
+		return errors.New("composite_dims_expr requires empty dimensions")
+	}
+	if !composite && veTrim != "" {
+		return errors.New("value_expr is only allowed when composite_dims_expr is true")
+	}
+
+	if !composite && widgetDimensionCount(w) > 1 && !WidgetAllowsMultiDims(w.Type) {
+		return fmt.Errorf("type %s allows only one dimension", w.Type)
+	}
+
+	if composite {
+		if len(lines) == 0 {
+			return errors.New("composite_dims_expr requires at least one non-empty expression line")
+		}
+		if !WidgetAllowsMultiExpr(w.Type) && len(lines) > 1 {
+			return fmt.Errorf("type %s allows only one expression line", w.Type)
+		}
+		for _, line := range lines {
+			if err := metricexpr.Validate(line); err != nil {
+				return fmt.Errorf("value_expr: %w", err)
+			}
+			ids, err := metricexpr.IdentifierNames(line)
+			if err != nil {
+				return fmt.Errorf("value_expr: %w", err)
+			}
+			if len(ids) == 0 {
+				return errors.New("value_expr must reference at least one dimension name")
+			}
+		}
+	}
+
 	switch w.Type {
 	case WidgetGauge, WidgetLine, WidgetProgress, WidgetHistogram:
 		if strings.TrimSpace(w.ChartID) == "" {
 			return fmt.Errorf("type %s requires chart_id", w.Type)
 		}
-		if len(w.Dimensions) == 0 {
-			return fmt.Errorf("type %s requires dimensions", w.Type)
+		if composite {
+			if len(lines) == 0 {
+				return fmt.Errorf("type %s requires value_expr when composite_dims_expr is set", w.Type)
+			}
+		} else {
+			if !hasDims {
+				return fmt.Errorf("type %s requires dimensions when not using composite_dims_expr", w.Type)
+			}
 		}
 	}
-	if w.Type == WidgetText && w.ChartID != "" && len(w.Dimensions) == 0 {
-		return errors.New("text with chart_id needs dimensions")
+	if w.Type == WidgetText && strings.TrimSpace(w.ChartID) != "" {
+		if composite {
+			if len(lines) == 0 {
+				return errors.New("text with chart_id requires value_expr when composite_dims_expr is set")
+			}
+		} else {
+			if !hasDims {
+				return errors.New("text with chart_id requires dimensions when not using composite_dims_expr")
+			}
+		}
 	}
 	if w.GaugeArcDegrees != 0 && w.GaugeArcDegrees != 180 && w.GaugeArcDegrees != 270 {
 		return errors.New("gauge_arc_degrees must be 180 or 270")

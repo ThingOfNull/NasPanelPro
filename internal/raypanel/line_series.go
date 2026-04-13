@@ -2,10 +2,12 @@ package raypanel
 
 import (
 	"context"
+	"math"
 	"strconv"
 	"strings"
 
 	"naspanel/internal/layout"
+	"naspanel/internal/metricexpr"
 	"naspanel/internal/netdata"
 	"naspanel/internal/nodes"
 )
@@ -49,6 +51,35 @@ func lineChartAfterSeconds(points int) string {
 		}
 	}
 	return "-" + strconv.Itoa(sec)
+}
+
+// sanitizeLineSeriesForChart 将 NaN/Inf 前后填充，避免 go-chart 与手绘折线异常。
+func sanitizeLineSeriesForChart(pts []float64) []float64 {
+	n := len(pts)
+	if n == 0 {
+		return pts
+	}
+	out := append([]float64(nil), pts...)
+	for i := 1; i < n; i++ {
+		if math.IsNaN(out[i]) || math.IsInf(out[i], 0) {
+			if !math.IsNaN(out[i-1]) && !math.IsInf(out[i-1], 0) {
+				out[i] = out[i-1]
+			}
+		}
+	}
+	for i := n - 2; i >= 0; i-- {
+		if math.IsNaN(out[i]) || math.IsInf(out[i], 0) {
+			if !math.IsNaN(out[i+1]) && !math.IsInf(out[i+1], 0) {
+				out[i] = out[i+1]
+			}
+		}
+	}
+	for i := range out {
+		if math.IsNaN(out[i]) || math.IsInf(out[i], 0) {
+			out[i] = 0
+		}
+	}
+	return out
 }
 
 // FillLineRings 用 Netdata /api/v1/data 多 points 响应刷新折线图（整段替换）。
@@ -121,6 +152,33 @@ func FillLineRings(ctx context.Context, lc *layout.LayoutConfig, sceneIndices []
 	for _, a := range assigns {
 		sr, ok := seriesByKey[a.fk]
 		if !ok {
+			continue
+		}
+		if a.w.CompositeDimsExpr {
+			lines := metricexpr.NonEmptyExprLines(a.w.ValueExpr)
+			if len(lines) == 0 {
+				continue
+			}
+			line := lines[0]
+			ids, err := metricexpr.IdentifierNames(line)
+			if err != nil {
+				continue
+			}
+			sub := make(map[string][]float64)
+			for _, id := range ids {
+				if pts, ok := sr.Series[id]; ok {
+					sub[id] = pts
+				}
+			}
+			if len(sub) == 0 {
+				continue
+			}
+			pts, err := metricexpr.EvalSeries(line, sub)
+			if err != nil || len(pts) < 2 {
+				continue
+			}
+			pts = sanitizeLineSeriesForChart(pts)
+			rings.Set(a.ringKey, pts)
 			continue
 		}
 		dim := pickLineDim(a.w, sr.Latest)
