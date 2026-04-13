@@ -15,6 +15,8 @@ type AppState = {
   saveLayout: () => Promise<void>
   saveNodes: () => Promise<void>
   saveSettings: () => Promise<void>
+  /** 节点 ID 变更时，同步更新所有 widget 中引用该旧 ID 的 node_id 字段。 */
+  renameNodeId: (oldId: string, newId: string) => void
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -45,19 +47,23 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   saveSettings: async () => {
     const { layout, nodes } = get()
-    if (!layout) {
-      return
-    }
-    const toSave = {
-      ...layout,
-      settings: {
-        width: layout.screen_width,
-        height: layout.screen_height,
-        rotation: layout.layout_rotation ?? 0,
-      },
-    }
-    await api.putLayout(toSave)
+    if (!layout) return
+    // 直接保存顶层字段（screen_width/screen_height/layout_rotation），不再写冗余的 settings 块。
+    await api.putLayout(layout)
     await api.putNodes({ nodes })
-    set({ layout: toSave, status: i18n.t('status.settingsSaved') })
+    set({ status: i18n.t('status.settingsSaved') })
+  },
+  renameNodeId: (oldId, newId) => {
+    const { layout } = get()
+    if (!layout || oldId === newId) return
+    const next = structuredClone(layout)
+    for (const scene of next.scenes) {
+      for (const w of scene.widgets) {
+        if (w.node_id === oldId) {
+          w.node_id = newId || undefined
+        }
+      }
+    }
+    set({ layout: next })
   },
 }))

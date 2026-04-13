@@ -137,7 +137,7 @@ func main() {
 		}
 	}
 
-	disp := raypanel.NewDisplay(c)
+	disp := raypanel.NewDisplay()
 	sup := supervisor.New(c, supervisor.Callbacks{
 		OnYield: func() error {
 			disp.SuspendRender()

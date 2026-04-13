@@ -38,10 +38,9 @@ func (o DataOpts) normalized() DataOpts {
 	return o
 }
 
-// FetchChartData 拉取单个 chart 的最新点（labels + data 格式）。
-func (c *Client) FetchChartData(ctx context.Context, chart string, opts DataOpts) (map[string]float64, error) {
-	opts = opts.normalized()
-	base := strings.TrimRight(c.BaseURL, "/")
+// buildDataURL 构造 /api/v1/data 请求 URL，供 FetchChartData 和 FetchChartSeries 共用。
+func buildDataURL(baseURL, chart string, opts DataOpts) (*url.URL, error) {
+	base := strings.TrimRight(baseURL, "/")
 	u, err := url.Parse(base + "/api/v1/data")
 	if err != nil {
 		return nil, err
@@ -52,7 +51,16 @@ func (c *Client) FetchChartData(ctx context.Context, chart string, opts DataOpts
 	q.Set("points", fmt.Sprintf("%d", opts.Points))
 	q.Set("group", opts.Group)
 	u.RawQuery = q.Encode()
+	return u, nil
+}
 
+// FetchChartData 拉取单个 chart 的最新点（labels + data 格式）。
+func (c *Client) FetchChartData(ctx context.Context, chart string, opts DataOpts) (map[string]float64, error) {
+	opts = opts.normalized()
+	u, err := buildDataURL(c.BaseURL, chart, opts)
+	if err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, err
@@ -78,18 +86,10 @@ func (c *Client) FetchChartData(ctx context.Context, chart string, opts DataOpts
 // FetchChartSeries 拉取 chart 的多个采样点（after/points 与 Netdata 一致）。
 func (c *Client) FetchChartSeries(ctx context.Context, chart string, opts DataOpts) (*ChartDataSeries, error) {
 	opts = opts.normalized()
-	base := strings.TrimRight(c.BaseURL, "/")
-	u, err := url.Parse(base + "/api/v1/data")
+	u, err := buildDataURL(c.BaseURL, chart, opts)
 	if err != nil {
 		return nil, err
 	}
-	q := u.Query()
-	q.Set("chart", chart)
-	q.Set("after", opts.After)
-	q.Set("points", fmt.Sprintf("%d", opts.Points))
-	q.Set("group", opts.Group)
-	u.RawQuery = q.Encode()
-
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, err

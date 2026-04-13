@@ -70,7 +70,7 @@ func (cc *ChartCache) SetClient(c *Client) {
 // Refresh 强制拉取 /api/v1/charts。
 func (cc *ChartCache) Refresh(ctx context.Context) error {
 	c := cc.client()
-	charts, err := c.FetchCharts()
+	charts, err := c.FetchCharts(ctx)
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -87,22 +87,28 @@ func (cc *ChartCache) Refresh(ctx context.Context) error {
 
 // Charts 返回缓存；若过期或空则 Refresh（ctx 可为 context.Background）。
 func (cc *ChartCache) Charts(ctx context.Context) (map[string]ChartDef, error) {
+	// 第一次加读锁：判断是否 stale，不 stale 时在持锁状态下直接返回，避免 TOCTOU。
 	cc.mu.RLock()
 	stale := cc.charts == nil || time.Since(cc.fetchedAt) > cc.ttl()
+	if !stale && cc.fetchErr == nil {
+		charts := cc.charts
+		cc.mu.RUnlock()
+		return charts, nil
+	}
 	err := cc.fetchErr
 	cc.mu.RUnlock()
-	if !stale && err == nil {
-		cc.mu.RLock()
-		defer cc.mu.RUnlock()
-		return cc.charts, nil
-	}
-	if err := cc.Refresh(ctx); err != nil {
+
+	// 需要刷新。
+	if refreshErr := cc.Refresh(ctx); refreshErr != nil {
 		cc.mu.RLock()
 		defer cc.mu.RUnlock()
 		if cc.charts != nil {
 			return cc.charts, nil
 		}
-		return nil, err
+		if err != nil {
+			return nil, err
+		}
+		return nil, refreshErr
 	}
 	cc.mu.RLock()
 	defer cc.mu.RUnlock()

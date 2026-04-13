@@ -24,7 +24,7 @@ function StatusIcon({ r, tOnline, tOffline }: { r?: ProbeResult; tOnline: string
 
 export default function DataSourcesSection() {
   const { t } = useTranslation()
-  const { nodes, setNodes, loadNodes, setStatus } = useAppStore()
+  const { nodes, setNodes, loadNodes, setStatus, renameNodeId } = useAppStore()
   const [probe, setProbe] = useState<Record<string, ProbeResult>>({})
   const [busy, setBusy] = useState<string | null>(null)
 
@@ -33,6 +33,10 @@ export default function DataSourcesSection() {
   }, [loadNodes, setStatus])
 
   const update = (i: number, patch: Partial<NetdataNode>) => {
+    // 节点 ID 变更时，同步更新 layout 中所有引用该旧 ID 的 widget。
+    if ('id' in patch && patch.id !== nodes[i].id) {
+      renameNodeId(nodes[i].id, patch.id ?? '')
+    }
     const next = nodes.map((n, j) => (j === i ? { ...n, ...patch } : n))
     setNodes(next)
   }

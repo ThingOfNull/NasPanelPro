@@ -56,7 +56,7 @@ func (c *Client) Probe(ctx context.Context) ProbeResult {
 		}
 	}
 
-	charts, err := c.FetchCharts()
+	charts, err := c.FetchCharts(ctx)
 	if err != nil {
 		return ProbeResult{Version: ver, Error: "charts: " + err.Error()}
 	}

@@ -18,8 +18,6 @@ import type { ChartDiscoveryRow, Widget } from '../types'
 
 const SNAP = 8
 const snap = (v: number) => Math.round(v / SNAP) * SNAP
-const STAGE_W = 1280
-const STAGE_H = 480
 const HANDLE = 8
 
 function applyResize(
@@ -385,6 +383,8 @@ export default function EditorPage() {
   }
 
   const sc = layout.scenes[sceneIdx]
+  const stageW = layout.screen_width || 1280
+  const stageH = layout.screen_height || 480
 
   return (
     <DndContext sensors={sensors} onDragEnd={onDragEnd}>
@@ -479,15 +479,15 @@ export default function EditorPage() {
             <div
               className="relative shadow-xl border border-zinc-700 bg-[#010409]"
               style={{
-                width: STAGE_W * scale,
-                height: STAGE_H * scale,
+                width: stageW * scale,
+                height: stageH * scale,
               }}
             >
               <div
                 className="origin-top-left"
                 style={{
-                  width: STAGE_W,
-                  height: STAGE_H,
+                  width: stageW,
+                  height: stageH,
                   transform: `scale(${scale})`,
                 }}
                 onClick={() => setSel(null)}

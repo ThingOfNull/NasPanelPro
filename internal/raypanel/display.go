@@ -3,8 +3,6 @@ package raypanel
 
 import (
 	"sync/atomic"
-
-	"naspanel/internal/cfg"
 )
 
 // Display 挂起状态，供 Supervisor 与渲染循环协作。
@@ -13,8 +11,7 @@ type Display struct {
 }
 
 // NewDisplay 构造显示状态机。
-func NewDisplay(c cfg.Config) *Display {
-	_ = c
+func NewDisplay() *Display {
 	return &Display{}
 }
 

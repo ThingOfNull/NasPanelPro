@@ -213,10 +213,12 @@ func drawWidgetGauge(w *layout.Widget, snap netdata.DataSnapshot, x, y, fw, fh f
 		v = 0
 	}
 	if strings.EqualFold(w.Unit, "percent") {
-		// 已是 0-100
+		// 已是 0-100，直接使用
 	} else {
+		// unit 为空或非 percent：值 > 1 视为 0-100 量纲，除以 100 得比例后再乘回；
+		// 值本身已在 0-1 范围内（如归一化比例）则直接乘 100。
 		v = math.Abs(v)
-		if v > 1.5 {
+		if v > 1 {
 			v = v / 100.0
 		}
 		if v > 1 {
@@ -319,10 +321,13 @@ func drawWidgetProgress(w *layout.Widget, snap netdata.DataSnapshot, x, y, fw, f
 	}
 	p := v
 	if strings.EqualFold(w.Unit, "percent") {
+		// 已是 0-100，归一化为比例
 		p = v / 100
 	} else if v > 1 {
+		// 非 percent 且值 > 1：视为 0-100 量纲，同 Gauge 逻辑
 		p = v / 100
 	}
+	// 值在 0-1 范围内时 p 直接使用
 	if p < 0 {
 		p = 0
 	}

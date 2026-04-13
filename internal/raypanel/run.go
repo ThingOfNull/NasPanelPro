@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"sync"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -23,7 +23,7 @@ func Run(ctx context.Context, opt Options) error {
 	}
 	d := opt.Display
 	if d == nil {
-		d = NewDisplay(opt.Config)
+		d = NewDisplay()
 	}
 
 	var stopFrame atomic.Bool
@@ -119,14 +119,16 @@ func Run(ctx context.Context, opt Options) error {
 	}, opt.NodeStore)
 	pollerCtx, pollerStop := context.WithCancel(ctx)
 	defer pollerStop()
-	var startPollOnce sync.Once
-	startPollOnce.Do(func() {
-		go poller.Run(pollerCtx, time.Second)
-	})
+	// 直接启动，不需要 sync.Once（此处只会执行一次）
+	go poller.Run(pollerCtx, time.Second)
 
 	var layoutModTime time.Time
 	var nodesModTime time.Time
 	reloadEvery := 0
+
+	// 缓存上一帧 poller 参数，避免每帧不必要的 alloc 和锁争用。
+	var lastBase string
+	var lastCharts []string
 
 	for !rl.WindowShouldClose() && !stopFrame.Load() {
 		if rl.IsKeyPressed(rl.KeyEscape) {
@@ -157,7 +159,7 @@ func Run(ctx context.Context, opt Options) error {
 		lc := opt.LayoutStore.Ptr()
 		sceneMgr.SetLayout(lc)
 
-		// Multi-node Plan is set; if Plan were nil, poller would use default node's BaseURL
+		// 仅在内容变化时才调用 SetBaseURL / SetCharts，避免每帧持锁写 Poller。
 		firstBase := ""
 		if opt.NodeStore != nil {
 			nf := opt.NodeStore.Get()
@@ -165,8 +167,15 @@ func Run(ctx context.Context, opt Options) error {
 				firstBase = fn.BaseURL()
 			}
 		}
-		poller.SetBaseURL(firstBase)
-		poller.SetCharts(ChartsForLayoutScenes(lc, sceneMgr.PollerChartIndices()...))
+		if firstBase != lastBase {
+			poller.SetBaseURL(firstBase)
+			lastBase = firstBase
+		}
+		charts := ChartsForLayoutScenes(lc, sceneMgr.PollerChartIndices()...)
+		if !slices.Equal(charts, lastCharts) {
+			poller.SetCharts(charts)
+			lastCharts = charts
+		}
 
 		sceneMgr.Tick()
 		snap := poller.Snapshot()

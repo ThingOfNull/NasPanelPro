@@ -2,6 +2,7 @@
 package netdata
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,14 +14,14 @@ import (
 
 // ChartDef 对应 /api/v1/charts 中单个图定义；dimensions 结构因插件而异，用 map 承接。
 type ChartDef struct {
-	ID          string                    `json:"id"`
-	Name        string                    `json:"name"`
-	Title       string                    `json:"title"`
-	Family      string                    `json:"family"`
-	Context     string                    `json:"context"`
-	Units       string                    `json:"units"`
-	Type        string                    `json:"type"`
-	Dimensions  map[string]DimensionEntry `json:"dimensions"`
+	ID         string                    `json:"id"`
+	Name       string                    `json:"name"`
+	Title      string                    `json:"title"`
+	Family     string                    `json:"family"`
+	Context    string                    `json:"context"`
+	Units      string                    `json:"units"`
+	Type       string                    `json:"type"`
+	Dimensions map[string]DimensionEntry `json:"dimensions"`
 }
 
 // DimensionEntry 为 dimensions 下单个键的值；可能是 {"name":"user"} 或带 multiplier 等字段。
@@ -62,9 +63,9 @@ func (c *Client) applyAuth(req *http.Request) {
 }
 
 // FetchCharts 请求 GET /api/v1/charts 并解析。
-func (c *Client) FetchCharts() (map[string]ChartDef, error) {
+func (c *Client) FetchCharts(ctx context.Context) (map[string]ChartDef, error) {
 	base := strings.TrimRight(c.BaseURL, "/")
-	req, err := http.NewRequest(http.MethodGet, base+"/api/v1/charts", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/api/v1/charts", nil)
 	if err != nil {
 		return nil, err
 	}

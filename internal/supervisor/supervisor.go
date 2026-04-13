@@ -40,7 +40,7 @@ func New(c cfg.Config, cb Callbacks) *Supervisor {
 // Run 阻塞直到 ctx 取消。
 func (s *Supervisor) Run(ctx context.Context) error {
 	kmsgCh := make(chan string, 32)
-	go kmsgReader(s.cfg.KMsgPath, kmsgCh)
+	go kmsgReader(ctx, s.cfg.KMsgPath, kmsgCh)
 
 	vcsp := time.NewTicker(time.Duration(s.cfg.VCSPoll) * time.Millisecond)
 	defer vcsp.Stop()
